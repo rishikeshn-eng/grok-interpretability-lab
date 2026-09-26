@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grok: watching a neural network suddenly understand</title>
+<meta name="description" content="A mechanistic interpretability lab. A network memorises modular addition in 400 steps, then groks it 30,000 steps later by building a Fourier algorithm. Scrub through 73 checkpoints and open up the weights.">
+<meta property="og:title" content="Grok: watching a neural network suddenly understand">
+<meta property="og:image" content="preview.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="loader"><svg viewBox="0 0 100 100" class="ld"><circle cx="50" cy="50" r="40"/><line id="ldHand" x1="50" y1="50" x2="50" y2="14"/></svg><span>Loading 73 checkpoints…</span></div>
+
+<header class="hero">
+  <div class="hero-grid">
+    <div>
+      <p class="kicker">Mechanistic interpretability lab · modular addition · 73 training checkpoints</p>
+      <h1>Grok</h1>
+      <p class="lede">A small network learns <span class="mono">(a + b) mod 97</span> from 30% of the possible pairs. It memorises its training examples within <b>400 steps</b> and keeps failing on unseen pairs for tens of thousands more. Then, around step 30,000, it suddenly <i>generalises</i>. Inside, it has built an algorithm out of waves: each neuron stores a number as an angle, and the network adds numbers by rotating. This lab lets you watch that algorithm form.</p>
+      <div class="hero-kpis">
+        <div><b>400</b><span>steps to memorise training set</span></div>
+        <div><b id="kGen">—</b><span>steps to generalise (test acc ≥ 95%)</span></div>
+        <div><b id="kPur">—</b><span>neuron "wave purity", start → end</span></div>
+      </div>
+      <a class="cta" href="#timeline">Scrub through training ↓</a>
+    </div>
+    <div class="clock-wrap">
+      <svg id="clock" viewBox="-130 -130 260 260"></svg>
+      <div class="clock-eq"><span id="cA">23</span> + <span id="cB">41</span> ≡ <b id="cC">64</b> <small>(mod 97)</small></div>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#timeline">01 Timeline</a>
+  <a href="#weights">02 Inside the weights</a>
+  <a href="#neuron">03 One neuron</a>
+  <a href="#calc">04 Run &amp; ablate</a>
+  <a href="#why">05 Why it matters</a>
+  <a href="#method">Method</a>
+</nav>
+
+<main>
+<section id="timeline" class="sec">
+  <div class="head"><span class="n">01</span><h2>Scrub through 40,000 steps of training</h2></div>
+  <p class="prose">The square is every possible question: row <i>a</i>, column <i>b</i>, 9,409 in all. The network trains on the 30% shown with dots and never sees the rest. Green cells are answered correctly. Drag the slider, or press play, and watch the unseen 70% flip from red to green long after the training set is perfect.</p>
+  <div class="card tl">
+    <div class="tl-ctl">
+      <button class="btn" id="tlPlay">▶ Play</button>
+      <input type="range" id="tlStep" min="0" max="72" value="0">
+      <div class="tl-step">step <b id="tlStepOut">0</b></div>
+    </div>
+    <div class="tl-grid">
+      <div class="gridwrap"><canvas id="gridCv" width="485" height="485"></canvas><div class="grid-legend"><span><i style="background:var(--ok)"></i>correct</span><span><i style="background:var(--bad)"></i>wrong</span><span><i class="dot"></i>in training set</span></div></div>
+      <div class="tl-right">
+        <div class="tl-stats">
+          <div><span>train accuracy</span><b id="sTrA">—</b></div>
+          <div><span>test accuracy</span><b id="sTeA">—</b></div>
+          <div><span>neuron wave purity</span><b id="sPur">—</b></div>
+          <div><span>weight norm</span><b id="sNorm">—</b></div>
+        </div>
+        <div id="curves" class="chart"></div>
+        <div class="phase" id="phase"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="weights" class="sec">
+  <div class="head"><span class="n">02</span><h2>Inside the weights: noise becomes waves</h2></div>
+  <p class="prose">Left: the input weights of all 256 hidden neurons (rows) for each value of <i>a</i> (columns), sorted by the frequency each neuron ends up using. Right: the same neurons in frequency space (a discrete Fourier transform of each row). At initialisation both are noise. By the end, every neuron is a clean wave at a single frequency, and together they cover all 48 frequencies. This "purity" rises steadily long before test accuracy moves. That makes it a <i>progress measure</i>: it shows the capability forming before the capability shows up in the test score.</p>
+  <div class="card">
+    <div class="tl-ctl"><button class="btn" id="wPlay">▶ Play</button><input type="range" id="wStep" min="0" max="72" value="0"><div class="tl-step">step <b id="wStepOut">0</b></div></div>
+    <div class="w-grid">
+      <div><div class="lbl">Neuron input weights W<sub>a</sub> · 256 neurons × 97 inputs</div><canvas id="wCv"></canvas></div>
+      <div><div class="lbl">Fourier power per neuron · 256 neurons × 48 frequencies</div><canvas id="fCv"></canvas></div>
+    </div>
+    <div class="lbl" style="margin-top:18px">Progress measure vs. test accuracy</div>
+    <div id="purChart" class="chart"></div>
+  </div>
+</section>
+
+<section id="neuron" class="sec">
+  <div class="head"><span class="n">03</span><h2>Open up one neuron</h2></div>
+  <p class="prose">Pick a neuron. Its input weights trace a cosine wave at frequency <i>k</i>. Because the same neuron receives both <i>a</i> and <i>b</i>, its activation over the whole a × b grid forms diagonal stripes. It depends only on <i>a + b</i>, which is exactly the quantity the task needs. Neurons at the same frequency with different phases combine, through cos(x)cos(y) − sin(x)sin(y) = cos(x + y), into something like a rotation on a circle of 97 positions.</p>
+  <div class="card">
+    <div class="row"><label class="inl">Neuron <input type="range" id="nSel" min="0" max="255" value="0"><output id="nOut">0</output></label><button class="btn ghost" id="nRand">Random neuron</button><span class="muted" id="nInfo"></span></div>
+    <div class="n-grid">
+      <div><div class="lbl">Input weights over a (dots) and best-fit cosine (line)</div><div id="nWave" class="chart"></div></div>
+      <div><div class="lbl">Activation over every (a, b)</div><canvas id="nAct" width="291" height="291"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<section id="calc" class="sec">
+  <div class="head"><span class="n">04</span><h2>Run the network, then break it</h2></div>
+  <p class="prose">Enter two numbers and the final network computes the answer in your browser. Then knock out whole groups of neurons by frequency, the kind of causal intervention interpretability researchers use to test a hypothesis. If the Fourier story is right, removing frequencies should damage the network gradually, not all at once.</p>
+  <div class="grid2">
+    <div class="card">
+      <div class="calc-in"><input type="number" id="ia" value="23" min="0" max="96"><span>+</span><input type="number" id="ib" value="41" min="0" max="96"><span>mod 97 =</span><b id="ans">?</b></div>
+      <div class="lbl">Output logits over all 97 answers</div>
+      <div id="logits" class="chart"></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Ablate neurons by frequency (click to toggle)</div>
+      <div class="freqs" id="freqs"></div>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="abNone">Restore all</button><button class="btn ghost" id="abHalf">Remove half at random</button><button class="btn ghost" id="abSweep">Run ablation sweep</button></div>
+      <div class="abl"><div><span>accuracy on all 9,409 pairs</span><b id="abAcc">—</b></div><div><span>neurons ablated</span><b id="abN">0</b></div></div>
+      <div id="sweep" class="chart"></div>
+    </div>
+  </div>
+</section>
+
+<section id="why" class="sec">
+  <div class="head"><span class="n">05</span><h2>Why a toy like this matters for AI safety</h2></div>
+  <div class="grid3">
+    <div class="card why"><b>Sudden capabilities</b><p>Large models sometimes gain abilities abruptly as they grow or train longer. Grokking is a small, fully observable case of that jump, where you can see the cause.</p></div>
+    <div class="card why"><b>Progress measures</b><p>Wave purity rose for 25,000 steps while test accuracy sat near zero. Measures read from inside the model can warn of a capability before behavioural evaluations detect it.</p></div>
+    <div class="card why"><b>Verification by intervention</b><p>Reading an algorithm off the weights is a hypothesis. Ablations test it causally. That is the standard interpretability work is held to when it is used to audit models.</p></div>
+  </div>
+</section>
+
+<section id="method" class="sec method">
+  <div class="head"><span class="n">§</span><h2>Method &amp; sources</h2></div>
+  <div class="grid2 small">
+    <div>
+      <h3>Model and training</h3>
+      <p>One-hidden-layer MLP with 256 ReLU neurons. The input is one-hot <i>a</i> and one-hot <i>b</i> (97 each), with separate embedding matrices W<sub>a</sub>, W<sub>b</sub> summed into the hidden layer, and a linear readout W<sub>2</sub> to 97 logits. Written from scratch in NumPy, with full-batch AdamW (lr 10⁻³, β = 0.9 / 0.98, weight decay 1.0) for 40,000 steps on a random 30% of the 9,409 pairs. Strong weight decay drives the network toward the lighter, general solution. No GPU needed.</p>
+      <h3>What is stored</h3>
+      <p>Train and test loss and accuracy every 100 steps. 73 checkpoints, spaced logarithmically early and every 1,000 steps later, each with W<sub>a</sub> (int8) and a bit-packed correctness grid over all 9,409 pairs. The final weights are int8 for the live calculator. The final network gets 98.8% of all pairs right, 98.3% on held-out pairs.</p>
+      <h3>Wave purity</h3>
+      <p>For each neuron, the share of its W<sub>a</sub> Fourier power (frequencies 1–48) in its single strongest frequency, reported as the median over neurons. A random vector scores about 0.09.</p>
+    </div>
+    <div>
+      <h3>Reading</h3>
+      <ul class="refs">
+        <li>Power, Burda, Edwards, Babuschkin, Misra. <i>Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets.</i> 2022.</li>
+        <li>Nanda, Chan, Lieberum, Smith, Steinhardt. <i>Progress Measures for Grokking via Mechanistic Interpretability.</i> ICLR 2023.</li>
+        <li>Gromov. <i>Grokking modular arithmetic.</i> 2023.</li>
+        <li>Liu, Michaud, Tegmark. <i>Omnigrok: Grokking Beyond Algorithmic Data.</i> ICLR 2023.</li>
+        <li>Zhong, Liu, Tegmark, Andreas. <i>The Clock and the Pizza: Two Stories in Mechanistic Explanation of Neural Networks.</i> NeurIPS 2023.</li>
+      </ul>
+      <h3>Honest caveats</h3>
+      <p>This is an MLP, not the one-layer transformer in Nanda et al., so the mechanism is closer to Gromov's analysis. Neurons here spread over all frequencies instead of settling on a handful of "key" ones. The qualitative story is the same: memorise, form a circuit, clean up, and generalise suddenly.</p>
+    </div>
+  </div>
+</section>
+</main>
+<footer class="foot">Built by <a href="https://github.com/rishikeshn-eng">Rishikesh Nair</a> · Trained from scratch in NumPy, runs in your browser · <a href="https://github.com/rishikeshn-eng/grok-interpretability-lab">Source on GitHub</a></footer>
+<div id="tip" class="tip"></div>
+<script src="app.js"></script>
+</body>
+</html>
